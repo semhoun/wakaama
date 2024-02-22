@@ -1891,7 +1891,7 @@ uint8_t  registration_handleRequest(lwm2m_context_t * contextP,
             clientP->altPath = altPath;
             clientP->format = format;
             clientP->lifetime = lifetime;
-            clientP->endOfLife = tv_sec + lifetime;
+            clientP->endOfLife = (tv_sec * 1.5) + lifetime;
             clientP->objectList = objects;
             clientP->sessionH = fromSessionH;
 
