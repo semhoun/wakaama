@@ -1891,7 +1891,7 @@ uint8_t  registration_handleRequest(lwm2m_context_t * contextP,
             clientP->altPath = altPath;
             clientP->format = format;
             clientP->lifetime = lifetime;
-            clientP->endOfLife = (tv_sec * 1.5) + lifetime;
+            clientP->endOfLife = tv_sec + (lifetime * 1.5);
             clientP->objectList = objects;
             clientP->sessionH = fromSessionH;
 
@@ -1998,7 +1998,7 @@ uint8_t  registration_handleRequest(lwm2m_context_t * contextP,
                 clientP->objectList = objects;
             }
 
-            clientP->endOfLife = tv_sec + clientP->lifetime;
+            clientP->endOfLife = tv_sec + (clientP->lifetime * 1.5);
 
             if (contextP->monitorCallback != NULL)
             {
