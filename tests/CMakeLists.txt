@@ -1,9 +1,8 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.21)
 
 project(lwm2munittests C)
 
 include(../wakaama.cmake)
-include(tests.cmake)
 
 set(TEST_SOURCES
     helper/log_handler.c
@@ -14,6 +13,7 @@ set(TEST_SOURCES
     core_convert_numbers_test.c
     core_list_tests.c
     core_logging_tests.c
+    core_message_size_test.c
     core_registration_tests.c
     core_uritests.c
     data_senml_cbor_tests.c
@@ -24,44 +24,34 @@ set(TEST_SOURCES
     unittests.c
 )
 
-if(WAKAAMA_MODE_CLIENT AND NOT WAKAAMA_MODE_BOOTSTRAP_SERVER)
-    add_test_variant(
-        TARGET_NAME lwm2munittests_client_lwm2m_1_0
-        SOURCE_FILES ${TEST_SOURCES}
-        COMPILE_DEFINITIONS LWM2M_CLIENT_MODE LWM2M_VERSION_1_0
-    )
+set(TARGET_NAME lwm2munittests)
 
-    add_test_variant(
-        TARGET_NAME lwm2munittests_client_bootstrap
-        SOURCE_FILES ${TEST_SOURCES}
-        COMPILE_DEFINITIONS LWM2M_CLIENT_MODE LWM2M_BOOTSTRAP
-    )
+add_executable(${TARGET_NAME})
+target_sources(${TARGET_NAME} PRIVATE ${TEST_SOURCES})
+
+set_defines(${TARGET_NAME})
+
+# link CUnit
+include(FindPkgConfig)
+pkg_search_module(CUNIT REQUIRED IMPORTED_TARGET cunit)
+target_link_libraries(${TARGET_NAME} PRIVATE PkgConfig::CUNIT)
+
+# Our tests are designed for POSIX systems
+target_compile_definitions(${TARGET_NAME} PRIVATE _POSIX_C_SOURCE=200809)
+
+target_sources_wakaama(${TARGET_NAME})
+
+target_link_libraries(${TARGET_NAME} PRIVATE wakaama_command_line wakaama_platform_posix wakaama_transport_testing_fake)
+
+if(SANITIZER)
+    target_compile_options(${TARGET_NAME} PRIVATE -fsanitize=${SANITIZER} -fno-sanitize-recover=all)
+    target_link_options(${TARGET_NAME} PRIVATE -fsanitize=${SANITIZER} -fno-sanitize-recover=all)
 endif()
 
-add_test_variant(
-    TARGET_NAME lwm2munittests_server_formats_no_float16_blocksize_64
-    SOURCE_FILES ${TEST_SOURCES}
-    COMPILE_DEFINITIONS LWM2M_SERVER_MODE LWM2M_OLD_CONTENT_FORMAT_SUPPORT LWM2M_SUPPORT_SENML_JSON
-                        LWM2M_SUPPORT_SENML_CBOR CBOR_NO_FLOAT16_ENCODING COAP_DEFAULT_BLOCK_SIZE=64
-)
-
-add_test_variant(
-    TARGET_NAME lwm2munittests_server
-    SOURCE_FILES ${TEST_SOURCES}
-    COMPILE_DEFINITIONS LWM2M_SERVER_MODE
-)
-
-if(NOT WAKAAMA_CLIENT_INITIATED_BOOTSTRAP)
-    add_test_variant(
-        TARGET_NAME lwm2munittests_client_server_bootstrap_all_formats
-        SOURCE_FILES ${TEST_SOURCES}
-        COMPILE_DEFINITIONS
-            LWM2M_CLIENT_MODE
-            LWM2M_SERVER_MODE
-            LWM2M_BOOTSTRAP_SERVER_MODE
-            LWM2M_SERVER_MODE
-            LWM2M_OLD_CONTENT_FORMAT_SUPPORT
-            LWM2M_SUPPORT_SENML_JSON
-            LWM2M_SUPPORT_SENML_CBOR
-    )
+if(COVERAGE)
+    target_compile_options(${TARGET_NAME} PRIVATE --coverage)
+    target_link_options(${TARGET_NAME} PRIVATE --coverage)
 endif()
+
+# Add our unit tests to the "test" target
+add_test(NAME ${TARGET_NAME}_test COMMAND ${TARGET_NAME})

@@ -24,12 +24,14 @@ OPT_BRANCH_SOURCE=
 OPT_BRANCH_TARGET=main
 OPT_C_EXTENSIONS=""
 OPT_C_STANDARD=""
-OPT_CLANG_FORMAT="clang-format-14"
+OPT_CLANG_FORMAT="clang-format-18"
 OPT_SANITIZER=""
 OPT_SCAN_BUILD=""
 OPT_SONARQUBE=""
 OPT_SOURCE_DIRECTORY="${REPO_ROOT_DIR}"
+OPT_BUILD_DIRECTORY="build-wakaama"
 OPT_TEST_COVERAGE_REPORT=""
+OPT_CODE_CHECKER="full"
 OPT_VERBOSE=0
 OPT_WRAPPER_CMD=""
 RUN_BUILD=0
@@ -39,6 +41,8 @@ RUN_CMAKE_FORMAT=0
 RUN_GITLINT=0
 RUN_GIT_BLAME_IGNORE=0
 RUN_TESTS=0
+RUN_DOXYGEN=0
+RUN_CODE_CHECKER=0
 
 HELP_MSG="usage: ${SCRIPT_NAME} <OPTIONS>...
 Runs build and test steps in CI.
@@ -58,6 +62,9 @@ Options:
                             (BINARY: defaults to ${OPT_CLANG_FORMAT})
   --source-directory PATH   Configure CMake using PATH instead of the
                             repositories root directory.
+  --build-directory PATH    Configure CMake using PATH as the build directory.
+                            Defaults to 'build-wakaama'. Builds from CMake
+                            presets are placed into 'build-presets' by default.
   --sanitizer TYPE          Enable sanitizer
                             (TYPE: address leak thread undefined)
   --scan-build BINARY       Enable Clang code analyzer using specified
@@ -67,6 +74,9 @@ Options:
                             (WRAPPER: path to build-wrapper)
   --test-coverage REPORT    Enable code coverage measurement, output REPORT
                             (REPORT: xml html text none)
+  --code-checker ACTION     Run the CodeChecker code analyzer to create a baseline,
+                            do a full check or a PR check (show just difference to baseline)
+                            (TYPE: full, diff, baseline)
   -v, --verbose             Verbose output
   -a, --all                 Run all steps required for a MR
   -h, --help                Display this help and exit
@@ -79,6 +89,8 @@ Available steps (executed by --all):
   --run-cmake-format       Check CMake files formatting
   --run-build              Build all targets
   --run-tests              Execute tests (works only for top level project)
+  --run-doxygen            Build the Doxygen documentation of the code
+  --run-code-checker       Run the CodeChecker code analyzer
 "
 
 function usage() {
@@ -97,11 +109,12 @@ function run_clang_format() {
   # shellcheck disable=SC2064
   trap "{ rm -f -- '${patch_file}'; }" EXIT TERM INT
 
-  "git-${OPT_CLANG_FORMAT}" --diff "${OPT_BRANCH_TARGET}" 2>&1 |
+  (set +o pipefail; "git-${OPT_CLANG_FORMAT}" --diff "${OPT_BRANCH_TARGET}" 2>&1 |
     { grep -v \
       -e 'no modified files to format' \
       -e 'clang-format did not modify any files' || true;
     } > "${patch_file}"
+  )
 
   if [ -s "${patch_file}" ]; then
     cat "${patch_file}"
@@ -112,7 +125,7 @@ function run_clang_format() {
 }
 
 function run_clean() {
-  rm -rf build-wakaama
+  rm -rf "${OPT_BUILD_DIRECTORY}"
   rm -rf build-presets
 }
 
@@ -147,32 +160,19 @@ function run_git_blame_ignore() {
 
 function run_build() {
   # Existing directory needed by SonarQube build-wrapper
-  mkdir -p build-wakaama
+  mkdir -p "${OPT_BUILD_DIRECTORY}"
 
-  echo "Default build"
-  ${OPT_WRAPPER_CMD} cmake -GNinja -S ${OPT_SOURCE_DIRECTORY} -B build-wakaama ${CMAKE_ARGS}
-  ${OPT_WRAPPER_CMD} cmake --build build-wakaama
-
-  # CMake presets
-  echo "CMake presets build"
-  for i in $(cmake --list-presets build | awk '/"/{ print $1 }' | tr -d '"');do
-  	echo "CMake preset $i"
-  	${OPT_WRAPPER_CMD} cmake --preset "$i" -G Ninja ${CMAKE_ARGS}
-    ${OPT_WRAPPER_CMD} cmake --build --preset "$i"
-  done
+  ${OPT_WRAPPER_CMD} cmake -GNinja -S ${OPT_SOURCE_DIRECTORY} -B "${OPT_BUILD_DIRECTORY}" \
+    -DWAKAAMA_PLATFORM=POSIX ${CMAKE_ARGS}
+  ${OPT_WRAPPER_CMD} cmake --build "${OPT_BUILD_DIRECTORY}"
 }
 
 function run_tests() {
-  echo "Default test run"
-  cmake --build build-wakaama --target test
+  export CTEST_OUTPUT_ON_FAILURE=ON
 
-  echo "CMake presets test run"
-  for i in $(cmake --list-presets build | awk '/"/{ print $1 }' | tr -d '"');do
-    echo "CMake preset $i"
-    cmake --build --preset "$i" --target test
-  done
+  cmake --build "${OPT_BUILD_DIRECTORY}" --target test
 
-  mkdir -p "${REPO_ROOT_DIR}/build-wakaama/coverage"
+  mkdir -p "${REPO_ROOT_DIR}/${OPT_BUILD_DIRECTORY}/coverage"
 
   if [ -z "${OPT_TEST_COVERAGE_REPORT}" ]; then
     return 0
@@ -181,21 +181,20 @@ function run_tests() {
   #see https://github.com/koalaman/shellcheck/wiki/SC2089
   gcovr_opts=(-r "${REPO_ROOT_DIR}/" \
     --keep `: # Needed for SonarQube` \
-    --exclude "${REPO_ROOT_DIR}"/examples \
-    --exclude "${REPO_ROOT_DIR}"/tests)
+    --exclude "${REPO_ROOT_DIR}"/examples)
 
   case "${OPT_TEST_COVERAGE_REPORT}" in
     xml)
       gcovr_out="--xml"
-      gcovr_file=("${REPO_ROOT_DIR}/build-wakaama/coverage/report.xml")
+      gcovr_file=("${REPO_ROOT_DIR}/${OPT_BUILD_DIRECTORY}/coverage/report.xml")
       ;;
     html)
       gcovr_out="--html --html-details"
-      gcovr_file=("${REPO_ROOT_DIR}/build-wakaama/coverage/report.html")
+      gcovr_file=("${REPO_ROOT_DIR}/${OPT_BUILD_DIRECTORY}/coverage/report.html")
       ;;
     text)
       gcovr_out=""
-      gcovr_file=("${REPO_ROOT_DIR}/build-wakaama/coverage/report.txt")
+      gcovr_file=("${REPO_ROOT_DIR}/${OPT_BUILD_DIRECTORY}/coverage/report.txt")
       ;;
     none)
       gcovr "${gcovr_opts[@]}" >/dev/null
@@ -211,6 +210,53 @@ function run_tests() {
 
   gcovr "${gcovr_opts[@]}" $gcovr_out -o "${gcovr_file[@]}"
   echo Coverage file "${gcovr_file[@]}" ready
+  # clean up
+  find "${REPO_ROOT_DIR}" -name \*.gcov -exec rm {} \;
+}
+
+function run_doxygen() {
+  mkdir -p build-wakaama/doxygen
+    GIT_REVISION=$(git rev-parse @) WORKING_DIR=$(pwd) DOXYGEN_OUT_DIR=build-wakaama/doxygen \
+      doxygen doc/doxygen/Doxyfile
+}
+
+function run_code_checker() {
+  readonly config_file="${REPO_ROOT_DIR}/tools/code_checker/config.json"
+  readonly ignore_file="${REPO_ROOT_DIR}/tools/code_checker/ignore.txt"
+  readonly baseline_file="${REPO_ROOT_DIR}/tools/code_checker/reports.baseline"
+  readonly code_checker_result_dir="build-wakaama/code_checker_result/"
+  readonly code_checker_report="build-wakaama/code_checker_report/"
+
+  set +e +o pipefail
+  CodeChecker check --logfile build-wakaama/compile_commands.json \
+                    --config "${config_file}" \
+                    --ignore "${ignore_file}" \
+                    --output ${code_checker_result_dir} \
+                    || true  # Always returns a non-zero status if issues are found
+  set -e -o pipefail
+
+  if [ "${OPT_CODE_CHECKER}" = "diff" ]; then
+    CodeChecker cmd diff -b "${baseline_file}" \
+                         -n $code_checker_result_dir \
+                         -o html \
+                         --export "${code_checker_report}" \
+                         --new
+  else
+    if [ "${OPT_CODE_CHECKER}" = "baseline" ]; then
+      output_format="baseline"
+      output_location="${baseline_file}"
+    else
+      output_format="html"
+      output_location="${code_checker_report}"
+    fi
+
+    CodeChecker parse -e "${output_format}" \
+                      -o "${output_location}" \
+                      --config "${config_file}" \
+                      --ignore "${ignore_file}" \
+                      --trim-path-prefix="${REPO_ROOT_DIR}" \
+                      "${code_checker_result_dir}"
+    fi
 }
 
 # Parse Options
@@ -243,11 +289,15 @@ if ! PARSED_OPTS=$($getopt -o vah \
                           -l run-gitlint \
                           -l run-git-blame-ignore \
                           -l run-tests \
+                          -l run-doxygen \
+                          -l run-code-checker \
                           -l sanitizer: \
                           -l scan-build: \
                           -l sonarqube: \
                           -l source-directory: \
+                          -l build-directory: \
                           -l test-coverage: \
+                          -l code-checker: \
                           -l verbose \
                           --name "${SCRIPT_NAME}" -- "$@");
 then
@@ -306,6 +356,16 @@ while true; do
       RUN_TESTS=1
       shift
       ;;
+    --run-doxygen)
+      RUN_DOXYGEN=1
+      shift
+      ;;
+    --run-code-checker)
+      RUN_CODE_CHECKER=1
+      # Analyzing works only when code gets actually built
+      RUN_CLEAN=1
+      shift
+      ;;
     --sanitizer)
       OPT_SANITIZER=$2
       shift 2
@@ -326,8 +386,16 @@ while true; do
       OPT_SOURCE_DIRECTORY=$2
       shift 2
       ;;
+    --build-directory)
+      OPT_BUILD_DIRECTORY=$2
+      shift 2
+      ;;
     --test-coverage)
       OPT_TEST_COVERAGE_REPORT=$2
+      shift 2
+      ;;
+    --code-checker)
+      OPT_CODE_CHECKER=$2
       shift 2
       ;;
     --)
@@ -346,6 +414,7 @@ while true; do
       RUN_GIT_BLAME_IGNORE=1
       RUN_BUILD=1
       RUN_TESTS=1
+      RUN_DOXYGEN=1
       shift
       ;;
     -h|--help)
@@ -384,10 +453,15 @@ if [ -n "${OPT_SCAN_BUILD}" ] && [ -n "${OPT_SONARQUBE}" ]; then
   exit 1
 fi
 
+if [ "${RUN_CODE_CHECKER}" = "1" ] && [ -n "${OPT_SONARQUBE}" ]; then
+  echo "--sonarqube and --code-checker can not be enabled at the same time"
+  exit 1
+fi
+
 if [ -n "${OPT_SONARQUBE}" ]; then
   OPT_TEST_COVERAGE_REPORT="${OPT_TEST_COVERAGE_REPORT:-none}"
   OPT_WRAPPER_CMD="${OPT_SONARQUBE} \
-    --out-dir build-wakaama/sonar-cloud-build-wrapper-output"
+    --out-dir ${OPT_BUILD_DIRECTORY}/sonar-cloud-build-wrapper-output"
 fi
 
 if [ -n "${OPT_TEST_COVERAGE_REPORT}" ]; then
@@ -399,9 +473,13 @@ if [ -n "${OPT_SCAN_BUILD}" ]; then
   # `CUnit` which leads to a lot of noisy issues in the report.
   # Also ignoring third-party `tinydtls` library.
   OPT_WRAPPER_CMD="${OPT_SCAN_BUILD} \
-    -o build-wakaama/clang-static-analyzer \
+    -o ${OPT_BUILD_DIRECTORY}/clang-static-analyzer \
     --exclude tests \
     --exclude examples/shared/tinydtls"
+fi
+
+if [ "${RUN_CODE_CHECKER}" = "1" ]; then
+  CMAKE_ARGS="${CMAKE_ARGS} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug"
 fi
 
 # Run Steps
@@ -433,3 +511,12 @@ fi
 if [ "${RUN_TESTS}" -eq 1 ]; then
   run_tests
 fi
+
+if [ "${RUN_DOXYGEN}" -eq 1 ]; then
+  run_doxygen
+fi
+
+if [ "${RUN_CODE_CHECKER}" = "1" ]; then
+  run_code_checker
+fi
+

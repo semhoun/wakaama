@@ -54,32 +54,36 @@ int main(void) {
     /* initialize the CUnit test registry */
     if (CUE_SUCCESS != CU_initialize_registry())
         return CU_get_error();
-
+#ifndef LWM2M_RAW_BLOCK1_REQUESTS
     if (CUE_SUCCESS != create_block1_suit())
         goto exit;
-
+#endif
     if (CUE_SUCCESS != create_block2_suit())
         goto exit;
 
     if (CUE_SUCCESS != create_convert_numbers_suit())
         goto exit;
 
+#ifdef LWM2M_SUPPORT_TLV
+#ifdef LWM2M_SUPPORT_JSON
     if (CUE_SUCCESS != create_tlv_json_suit())
         goto exit;
+#endif
 
     if (CUE_SUCCESS != create_tlv_suit())
         goto exit;
+#endif
 
     if (CUE_SUCCESS != create_uri_suit())
         goto exit;
 
-#ifdef LWM2M_SUPPORT_SENML_JSON
-   if (CUE_SUCCESS != create_senml_json_suit())
-       goto exit;
+#if defined(LWM2M_SUPPORT_JSON) && defined(LWM2M_SUPPORT_SENML_JSON)
+    if (CUE_SUCCESS != create_senml_json_suit())
+        goto exit;
 #endif
 
 #ifdef LWM2M_SUPPORT_SENML_CBOR
-#ifndef LWM2M_VERSION_1_1
+#ifdef LWM2M_VERSION_1_0
    if (CUE_SUCCESS != create_cbor_suit())
        goto exit;
 #endif
@@ -100,6 +104,10 @@ int main(void) {
 
 #if LWM2M_LOG_LEVEL != LWM2M_LOG_DISABLED
    if (CUE_SUCCESS != create_logging_test_suit())
+       goto exit;
+#endif
+#ifdef LWM2M_SERVER_MODE
+   if (CUE_SUCCESS != create_message_size_test_suit())
        goto exit;
 #endif
 

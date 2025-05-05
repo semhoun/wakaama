@@ -1,11 +1,13 @@
+include_guard(DIRECTORY)
+
 set(WAKAAMA_TOP_LEVEL_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}")
 set(WAKAAMA_EXAMPLE_DIRECTORY "${WAKAAMA_TOP_LEVEL_DIRECTORY}/examples")
 set(WAKAAMA_EXAMPLE_SHARED_DIRECTORY "${WAKAAMA_EXAMPLE_DIRECTORY}/shared")
 
 # Mode
-option(WAKAAMA_MODE_SERVER "Enable LWM2M Server interfaces" OFF)
-option(WAKAAMA_MODE_BOOTSTRAP_SERVER "Enable LWM2M Bootstrap Server interfaces" OFF)
-option(WAKAAMA_MODE_CLIENT "Enable LWM2M Client interfaces" OFF)
+option(WAKAAMA_MODE_SERVER "Enable LwM2M Server interfaces" ON)
+option(WAKAAMA_MODE_BOOTSTRAP_SERVER "Enable LwM2M Bootstrap Server interfaces" ON)
+option(WAKAAMA_MODE_CLIENT "Enable LwM2M Client interfaces" ON)
 
 # Client
 option(WAKAAMA_CLIENT_INITIATED_BOOTSTRAP "Enable client initiated bootstrap support in a client" OFF)
@@ -13,14 +15,14 @@ option(WAKAAMA_CLIENT_LWM2M_V_1_0 "Restrict the client code to use LwM2M version
 
 # Data Types
 
-set(WAKAAMA_DATA_TLV "Enable TLV payload support" ON)
-set(WAKAAMA_DATA_JSON "Enable JSON payload support" ON)
-set(WAKAAMA_DATA_SENML_JSON "Enable SenML JSON payload support" ON)
-set(WAKAAMA_DATA_SENML_CBOR "Enable SenML CBOR payload support" ON)
+option(WAKAAMA_DATA_TLV "Enable TLV payload support" ON)
+option(WAKAAMA_DATA_JSON "Enable JSON payload support" ON)
+option(WAKAAMA_DATA_SENML_JSON "Enable SenML JSON payload support" ON)
+option(WAKAAMA_DATA_SENML_CBOR "Enable SenML CBOR payload support" ON)
 
-set(WAKAAMA_DATA_SENML_CBOR_FLOAT16_SUPPORT "Enable 16-bit float support in CBOR" ON)
+option(WAKAAMA_DATA_SENML_CBOR_FLOAT16_SUPPORT "Enable 16-bit float support in CBOR" ON)
 
-set(WAKAAMA_DATA_OLD_CONTENT_FORMAT "Support the deprecated content format values for TLV and JSON" ON)
+option(WAKAAMA_DATA_OLD_CONTENT_FORMAT "Support the deprecated content format values for TLV and JSON" ON)
 
 # CoAP
 option(WAKAAMA_COAP_RAW_BLOCK1_REQUESTS "Pass each unprocessed block 1 payload to the application" OFF)
@@ -40,6 +42,27 @@ set_property(
              256
              512
              1024
+)
+
+set(WAKAAMA_COAP_MAX_MESSAGE_SIZE
+    2048
+    CACHE STRING "Max. CoAP packet size."
+)
+
+if(WAKAAMA_COAP_DEFAULT_BLOCK_SIZE GREATER WAKAAMA_COAP_MAX_MESSAGE_SIZE)
+    message(FATAL_ERROR "Packet size needs to be bigger than the block size.")
+endif()
+
+# The maximum number of retransmissions used for confirmable messages.
+set(WAKAAMA_COAP_DEFAULT_MAX_RETRANSMIT
+    4
+    CACHE STRING "Default CoAP max retransmissions"
+)
+
+# The max time to wait between the empty ack and the separate response message.
+set(WAKAAMA_COAP_SEPARATE_TIMEOUT
+    15
+    CACHE STRING "CoAP separate response timeout; Used if not set on a per-target basis"
 )
 
 # Logging
@@ -64,6 +87,26 @@ set(WAKAAMA_LOG_MAX_MSG_TXT_SIZE
     200
     CACHE STRING "The buffer size for the log message (without additional data)"
 )
+
+# Transport
+set(WAKAAMA_TRANSPORT
+    NONE
+    CACHE STRING "The transport layer implementation"
+)
+set_property(CACHE WAKAAMA_TRANSPORT PROPERTY STRINGS NONE POSIX_UDP TINYDTLS)
+
+# Platform
+set(WAKAAMA_PLATFORM
+    NONE
+    CACHE STRING "The platform abstraction layer implementation"
+)
+set_property(CACHE WAKAAMA_TRANSPORT PROPERTY STRINGS POSIX NONE)
+
+# Command line interface
+option(WAKAAMA_CLI "Command line interface library" OFF)
+
+# Endianess
+add_compile_definitions("$<IF:$<STREQUAL:${CMAKE_C_BYTE_ORDER},BIG_ENDIAN>,LWM2M_BIG_ENDIAN,LWM2M_LITTLE_ENDIAN>")
 
 # Possibility to disable the examples
 option(WAKAAMA_ENABLE_EXAMPLES "Build all the example applications" ON)
@@ -95,16 +138,16 @@ endfunction()
 
 # Set defines regarding the different data types
 function(set_data_format_defines target)
-    if(WAKAMA_DATA_TLV)
+    if(WAKAAMA_DATA_TLV)
         target_compile_definitions(${target} PUBLIC LWM2M_SUPPORT_TLV)
     endif()
-    if(WAKAMA_DATA_JSON)
+    if(WAKAAMA_DATA_JSON)
         target_compile_definitions(${target} PUBLIC LWM2M_SUPPORT_JSON)
     endif()
-    if(WAKAMA_DATA_SENML_JSON)
+    if(WAKAAMA_DATA_SENML_JSON)
         target_compile_definitions(${target} PUBLIC LWM2M_SUPPORT_SENML_JSON)
     endif()
-    if(WAKAMA_DATA_SENML_CBOR)
+    if(WAKAAMA_DATA_SENML_CBOR)
         target_compile_definitions(${target} PUBLIC LWM2M_SUPPORT_SENML_CBOR)
     endif()
     if(NOT WAKAAMA_DATA_SENML_CBOR_FLOAT16_SUPPORT)
@@ -122,6 +165,14 @@ function(set_coap_defines)
     endif()
 
     target_compile_definitions(${target} PUBLIC LWM2M_COAP_DEFAULT_BLOCK_SIZE=${WAKAAMA_COAP_DEFAULT_BLOCK_SIZE})
+
+    target_compile_definitions(${target} PUBLIC LWM2M_COAP_MAX_MESSAGE_SIZE=${WAKAAMA_COAP_MAX_MESSAGE_SIZE})
+
+    target_compile_definitions(
+        ${target} PUBLIC LWM2M_COAP_DEFAULT_MAX_RETRANSMIT=${WAKAAMA_COAP_DEFAULT_MAX_RETRANSMIT}
+    )
+
+    target_compile_definitions(${target} PUBLIC LWM2M_COAP_SEPARATE_TIMEOUT=${WAKAAMA_COAP_SEPARATE_TIMEOUT})
 endfunction()
 
 # Set the defines for logging configuration
@@ -205,10 +256,6 @@ function(target_sources_wakaama target)
     # We should not (have to) do this!
     target_include_directories(${target} PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/core)
 
-    target_compile_definitions(
-        ${target} PUBLIC "$<IF:$<STREQUAL:${CMAKE_C_BYTE_ORDER},BIG_ENDIAN>,LWM2M_BIG_ENDIAN,LWM2M_LITTLE_ENDIAN>"
-    )
-
     # set defines
     set_defines(${target})
 
@@ -230,35 +277,67 @@ function(target_sources_wakaama target)
     target_sources_data(${target})
 endfunction()
 
-# Add shared source files to an existing target.
-function(target_sources_shared target)
-    get_target_property(TARGET_PROPERTY_CONN_IMPL ${target} CONNECTION_IMPLEMENTATION)
+# Commandline library
+add_library(wakaama_command_line OBJECT)
+target_sources(wakaama_command_line PRIVATE ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY}/commandline.c)
+target_include_directories(wakaama_command_line PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/include)
+target_include_directories(wakaama_command_line PUBLIC ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY})
 
-    target_sources(
-        ${target} PRIVATE ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY}/commandline.c
-                          ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY}/platform.c
-    )
+# POSIX platform library
+add_library(wakaama_platform_posix OBJECT)
+target_sources(wakaama_platform_posix PRIVATE ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY}/platform.c)
+target_include_directories(wakaama_platform_posix PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/include)
+target_compile_definitions(wakaama_platform_posix PRIVATE _POSIX_C_SOURCE=200809)
 
-    set_defines(${target})
+# Transport UDP (POSIX) implementation library
+add_library(wakaama_transport_posix_udp OBJECT)
+target_sources(wakaama_transport_posix_udp PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/transport/udp/connection.c)
+target_include_directories(wakaama_transport_posix_udp PUBLIC ${WAKAAMA_TOP_LEVEL_DIRECTORY}/transport/udp/include)
+target_include_directories(wakaama_transport_posix_udp PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/include)
+target_link_libraries(wakaama_transport_posix_udp PRIVATE wakaama_command_line)
+target_compile_definitions(wakaama_transport_posix_udp PRIVATE _POSIX_C_SOURCE=200809)
 
-    if(NOT TARGET_PROPERTY_CONN_IMPL)
-        target_sources(${target} PRIVATE ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY}/connection.c)
-    elseif(TARGET_PROPERTY_CONN_IMPL MATCHES "tinydtls")
-        include(${WAKAAMA_EXAMPLE_SHARED_DIRECTORY}/tinydtls.cmake)
-        target_sources(${target} PRIVATE ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY}/dtlsconnection.c)
-        target_compile_definitions(${target} PRIVATE WITH_TINYDTLS)
-        target_sources_tinydtls(${target})
-    elseif(TARGET_PROPERTY_CONN_IMPL MATCHES "testing")
-        target_include_directories(${target} PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/tests/helper/)
-        target_sources(${target} PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/tests/helper/connection.c)
-    else()
-        message(
-            FATAL_ERROR "${target}: Unknown connection (DTLS) implementation '${TARGET_PROPERTY_CONN_IMPL} requested"
-        )
-    endif()
+# Transport 'tinydtls' implementation library
+add_library(wakaama_transport_tinydtls OBJECT)
+include(${WAKAAMA_TOP_LEVEL_DIRECTORY}/transport/tinydtls/tinydtls.cmake)
+target_sources(wakaama_transport_tinydtls PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/transport/tinydtls/connection.c)
+target_compile_definitions(wakaama_transport_tinydtls PUBLIC WITH_TINYDTLS)
+target_include_directories(
+    wakaama_transport_tinydtls PUBLIC ${WAKAAMA_TOP_LEVEL_DIRECTORY}/transport/tinydtls/include
+                                      ${WAKAAMA_TOP_LEVEL_DIRECTORY}/transport/tinydtls/third_party
+)
+target_include_directories(wakaama_transport_tinydtls PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/include)
+target_sources_tinydtls(wakaama_transport_tinydtls)
+target_link_libraries(wakaama_transport_tinydtls PRIVATE wakaama_command_line)
+target_compile_definitions(wakaama_transport_tinydtls PRIVATE _POSIX_C_SOURCE=200809)
 
-    target_include_directories(${target} PUBLIC ${WAKAAMA_EXAMPLE_SHARED_DIRECTORY})
-endfunction()
+# Transport 'testing' implementation library
+add_library(wakaama_transport_testing_fake OBJECT)
+target_include_directories(wakaama_transport_testing_fake PUBLIC ${WAKAAMA_TOP_LEVEL_DIRECTORY}/tests/helper/)
+target_include_directories(wakaama_transport_testing_fake PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/include/)
+target_sources(wakaama_transport_testing_fake PRIVATE ${WAKAAMA_TOP_LEVEL_DIRECTORY}/tests/helper/connection.c)
+
+# Static library that users of Wakaama can link against
+#
+# This library simplifies building and maintaining Wakaama. It handles defines and compiler flags, adding the right
+# source files and setting include directories...
+add_library(wakaama_static STATIC)
+target_sources_wakaama(wakaama_static)
+target_include_directories(wakaama_static PUBLIC ${WAKAAMA_TOP_LEVEL_DIRECTORY}/include/)
+
+if(WAKAAMA_TRANSPORT STREQUAL POSIX_UDP)
+    target_link_libraries(wakaama_static PUBLIC wakaama_transport_posix_udp)
+elseif(WAKAAMA_TRANSPORT STREQUAL TINYDTLS)
+    target_link_libraries(wakaama_static PUBLIC wakaama_transport_tinydtls)
+endif()
+
+if(WAKAAMA_PLATFORM STREQUAL POSIX)
+    target_link_libraries(wakaama_static PUBLIC wakaama_platform_posix)
+endif()
+
+if(WAKAAMA_CLI)
+    target_link_libraries(wakaama_static PUBLIC wakaama_command_line)
+endif()
 
 # Enforce a certain level of hygiene
 add_compile_options(

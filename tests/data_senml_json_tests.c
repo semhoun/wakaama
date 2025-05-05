@@ -31,7 +31,7 @@
 #include "CUnit/Basic.h"
 #include "tests.h"
 
-#ifdef LWM2M_SUPPORT_SENML_JSON
+#if defined(LWM2M_SUPPORT_JSON) && defined(LWM2M_SUPPORT_SENML_JSON)
 
 #ifndef STR_MEDIA_TYPE
 #define STR_MEDIA_TYPE(M)                                                                                              \
@@ -531,7 +531,7 @@ static void senml_json_test_23(void) {
                                      strlen(buffer));
     lwm2m_data_free(1, dataP);
 
-    /* This test is added for https://github.com/eclipse/wakaama/issues/274 */
+    /* This test is added for https://github.com/eclipse-wakaama/wakaama/issues/274 */
     const char *buffer2 = "[{\"bn\":\"/34/0/2\",\"vd\":\"MA==\"}]";
     senml_json_test_raw("/34/0/2", (uint8_t *)buffer2, strlen(buffer2), LWM2M_CONTENT_SENML_JSON, "23c");
 }

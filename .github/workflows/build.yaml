@@ -2,19 +2,23 @@ name: Compilation only checks
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   standards:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
-        compiler: ["clang-14", "gcc-12"]
+        compiler: ["clang-18", "gcc-13"]
         c_standard: ["99", "11"]
         c_extensions: ["ON", "OFF"]
 
     steps:
     - name: Checkout code including full history and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         submodules: true
         fetch-depth: 0
@@ -34,15 +38,15 @@ jobs:
         CC:  ${{ matrix.compiler }}
 
   standalone-examples:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
-        example: ["bootstrap_server", "client", "lightclient", "server"]
+        example: ["bootstrap_server", "client/udp", "client/tinydtls", "client/raw_block1", "lightclient", "server"]
 
     steps:
     - name: Checkout code including full history and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
         submodules: true
         fetch-depth: 0
@@ -57,4 +61,5 @@ jobs:
         tools/ci/run_ci.sh \
           --run-clean \
           --run-build \
-          --source-directory examples/${{ matrix.example }}
+          --source-directory examples/${{ matrix.example }} \
+          --build-directory wakaama-build-${{ matrix.example }}

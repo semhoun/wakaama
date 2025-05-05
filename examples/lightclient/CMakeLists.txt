@@ -1,12 +1,18 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.21)
 
 project(lightclient C)
 
-include(../../wakaama.cmake)
+set(WAKAAMA_MODE_CLIENT ON)
+set(WAKAAMA_MODE_SERVER OFF)
+set(WAKAAMA_MODE_BOOTSTRAP_SERVER OFF)
 
-if(WAKAAMA_ENABLE_EXAMPLES AND WAKAAMA_MODE_CLIENT)
-    add_executable(lightclient lightclient.c object_device.c object_security.c object_server.c object_test.c)
-    target_compile_definitions(lightclient PRIVATE LWM2M_CLIENT_MODE)
-    target_sources_wakaama(lightclient)
-    target_sources_shared(lightclient)
-endif()
+set(WAKAAMA_CLI ON)
+set(WAKAAMA_TRANSPORT POSIX_UDP)
+set(WAKAAMA_PLATFORM POSIX)
+add_subdirectory(../../ wakaama_lib)
+
+add_executable(lightclient)
+target_sources(lightclient PRIVATE lightclient.c object_device.c object_security.c object_server.c object_test.c)
+target_link_libraries(lightclient PRIVATE wakaama_static)
+
+enable_testing()

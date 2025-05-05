@@ -72,9 +72,7 @@
 #include <inttypes.h>
 
 #include "commandline.h"
-#include "connection.h"
-
-#define MAX_PACKET_SIZE 2048
+#include "udp/connection.h"
 
 static int g_quit = 0;
 
@@ -953,19 +951,17 @@ syntax_error:
 static void prv_monitor_callback(lwm2m_context_t *lwm2mH, uint16_t clientID, lwm2m_uri_t *uriP, int status,
                                  block_info_t *block_info, lwm2m_media_type_t format, uint8_t *data, size_t dataLength,
                                  void *userData) {
-    lwm2m_client_t * targetP;
+    lwm2m_client_t *clientP;
 
     /* unused parameter */
     (void)userData;
+
+    clientP = (lwm2m_client_t *)LWM2M_LIST_FIND(lwm2mH->clientList, clientID);
 
     switch (status)
     {
     case COAP_201_CREATED:
         fprintf(stdout, "\r\nNew client #%d registered.\r\n", clientID);
-
-        targetP = (lwm2m_client_t *)lwm2m_list_find((lwm2m_list_t *)lwm2mH->clientList, clientID);
-
-        prv_dump_client(targetP);
         break;
 
     case COAP_202_DELETED:
@@ -974,35 +970,34 @@ static void prv_monitor_callback(lwm2m_context_t *lwm2mH, uint16_t clientID, lwm
 
     case COAP_204_CHANGED:
         fprintf(stdout, "\r\nClient #%d updated.\r\n", clientID);
-
-        targetP = (lwm2m_client_t *)lwm2m_list_find((lwm2m_list_t *)lwm2mH->clientList, clientID);
-
-        prv_dump_client(targetP);
         break;
 
     default:
         fprintf(stdout, "\r\nMonitor callback called with an unknown status: %d.\r\n", status);
         break;
     }
+    prv_dump_client(clientP);
 
     fprintf(stdout, "\r\n> ");
     fflush(stdout);
 }
 
-#ifndef LWM2M_VERSION_1_0
 static void prv_reporting_send_callback(lwm2m_context_t *lwm2mH, uint16_t clientID, lwm2m_uri_t *uriP, int status,
                                         block_info_t *block_info, lwm2m_media_type_t format, uint8_t *data,
                                         size_t dataLength, void *userData) {
+    lwm2m_client_t *clientP;
+
     /* unused parameter */
     (void)userData;
 
-    fprintf(stdout, "\r\nClient #%d send.\r\n", clientID);
-    output_data(stdout, block_info, format, data, dataLength, 1);
+    clientP = (lwm2m_client_t *)LWM2M_LIST_FIND(lwm2mH->clientList, clientID);
+
+    fprintf(stdout, "\r\nSend callback called with status: %d.\r\n", status);
+    prv_dump_client(clientP);
 
     fprintf(stdout, "\r\n> ");
     fflush(stdout);
 }
-#endif
 
 static void prv_quit(lwm2m_context_t *lwm2mH,
                      char * buffer,
@@ -1023,7 +1018,7 @@ void handle_sigint(int signum)
 void print_usage(void)
 {
     fprintf(stderr, "Usage: lwm2mserver [OPTION]\r\n");
-    fprintf(stderr, "Launch a LWM2M server on localhost.\r\n\n");
+    fprintf(stderr, "Launch a LwM2M server on localhost.\r\n\n");
     fprintf(stdout, "Options:\r\n");
     fprintf(stdout, "  -4\t\tUse IPv4 connection. Default: IPv6 connection\r\n");
     fprintf(stdout, "  -l PORT\tSet the local UDP port of the Server. Default: "LWM2M_STANDARD_PORT_STR"\r\n");
@@ -1039,7 +1034,7 @@ int main(int argc, char *argv[])
     struct timeval tv;
     int result;
     lwm2m_context_t * lwm2mH = NULL;
-    connection_t * connList = NULL;
+    lwm2m_connection_t *connList = NULL;
     int addressFamily = AF_INET6;
     int opt;
     const char * localPort = LWM2M_STANDARD_PORT_STR;
@@ -1154,7 +1149,7 @@ int main(int argc, char *argv[])
         opt += 1;
     }
 
-    sock = create_socket(localPort, addressFamily);
+    sock = lwm2m_create_socket(localPort, addressFamily);
     if (sock < 0)
     {
         fprintf(stderr, "Error opening socket: %d\r\n", errno);
@@ -1173,6 +1168,7 @@ int main(int argc, char *argv[])
     fprintf(stdout, "> "); fflush(stdout);
 
     lwm2m_set_monitoring_callback(lwm2mH, prv_monitor_callback, NULL);
+    lwm2m_reporting_set_send_callback(lwm2mH, prv_reporting_send_callback, NULL);
 
 #ifndef LWM2M_VERSION_1_0
     lwm2m_reporting_set_send_callback(lwm2mH, prv_reporting_send_callback, NULL);
@@ -1205,7 +1201,7 @@ int main(int argc, char *argv[])
         }
         else if (result > 0)
         {
-            uint8_t buffer[MAX_PACKET_SIZE];
+            uint8_t buffer[LWM2M_COAP_MAX_MESSAGE_SIZE];
             ssize_t numBytes;
 
             if (FD_ISSET(sock, &readfds))
@@ -1214,23 +1210,19 @@ int main(int argc, char *argv[])
                 socklen_t addrLen;
 
                 addrLen = sizeof(addr);
-                numBytes = recvfrom(sock, buffer, MAX_PACKET_SIZE, 0, (struct sockaddr *)&addr, &addrLen);
+                numBytes = recvfrom(sock, buffer, LWM2M_COAP_MAX_MESSAGE_SIZE, 0, (struct sockaddr *)&addr, &addrLen);
 
                 if (numBytes == -1)
                 {
                     fprintf(stderr, "Error in recvfrom(): %d\r\n", errno);
-                }
-                else if (numBytes >= MAX_PACKET_SIZE) 
-                {
-                    fprintf(stderr, "Received packet >= MAX_PACKET_SIZE\r\n");
-                } 
-                else
-                {
+                } else if (numBytes >= LWM2M_COAP_MAX_MESSAGE_SIZE) {
+                    fprintf(stderr, "Received packet >= LWM2M_COAP_MAX_MESSAGE_SIZE\r\n");
+                } else {
                     char s[INET6_ADDRSTRLEN];
                     in_port_t port;
-                    connection_t * connP;
+                    lwm2m_connection_t *connP;
 
-					s[0] = 0;
+                    s[0] = 0;
                     if (AF_INET == addr.ss_family)
                     {
                         struct sockaddr_in *saddr = (struct sockaddr_in *)&addr;
@@ -1247,10 +1239,10 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "%zd bytes received from [%s]:%hu\r\n", numBytes, s, ntohs(port));
                     output_buffer(stderr, buffer, (size_t)numBytes, 0);
 
-                    connP = connection_find(connList, &addr, addrLen);
+                    connP = lwm2m_connection_find(connList, &addr, addrLen);
                     if (connP == NULL)
                     {
-                        connP = connection_new_incoming(connList, sock, (struct sockaddr *)&addr, addrLen);
+                        connP = lwm2m_connection_new_incoming(connList, sock, (struct sockaddr *)&addr, addrLen);
                         if (connP != NULL)
                         {
                             connList = connP;
@@ -1292,7 +1284,7 @@ int main(int argc, char *argv[])
 
     lwm2m_close(lwm2mH);
     close(sock);
-    connection_free(connList);
+    lwm2m_connection_free(connList);
 
     return 0;
 }
